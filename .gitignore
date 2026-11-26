@@ -140,6 +140,8 @@ cache/
 # Dataset Files
 *.csv
 *.json
+!frontend/package.json
+!frontend/package-lock.json
 *.jsonl
 datasets/
 data/
