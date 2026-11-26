@@ -140,7 +140,9 @@ def generate_response_with_feedback(
         logger.info(f"Detected emotion: {emotion} ({confidence:.2f})")
 
         # 3. Retrieval (prefers pairs with the same emotion)
-        retrieved = model.retrieve_similar_responses(user_input, top_k=3, emotion=emotion)
+        # Include the previous user message so short follow-ups keep their topic.
+        query = f"{history[-1]['user']} {user_input}" if history else user_input
+        retrieved = model.retrieve_similar_responses(query, top_k=3, emotion=emotion)
         example = retrieved[0] if retrieved else None
 
         # 4. Generate -> score -> refine loop

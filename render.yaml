@@ -1,0 +1,13 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: personagen
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.lite
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false        # Render asks you for the value when you deploy
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini

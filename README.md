@@ -82,7 +82,23 @@ models, so it starts in a few seconds and needs no downloads at runtime.
 
 ## Deploy
 
-The app is one Docker container (~2 GB image, ~1 GB RAM), so it needs a host
+### Render (free) — lite version
+
+`render.yaml` deploys a **lite** build (`Dockerfile.lite`) that skips PyTorch and the
+local models and uses OpenAI for both emotion detection and replies. It needs about
+200 MB of RAM, so it fits Render's free tier. It requires an OpenAI API key.
+
+1. Sign up at https://render.com with your GitHub account.
+2. **New → Blueprint**, connect this repository, pick the branch, click **Apply**.
+3. Paste your `OPENAI_API_KEY` when Render asks for it.
+
+The app is live at `https://personagen-xxxx.onrender.com` after the build (~5 min).
+Free instances sleep after 15 minutes idle; the first visit after that takes ~30–60 s.
+Conversation memory is in RAM, so it resets when the instance sleeps.
+
+### Full version (local models)
+
+The full app is one Docker container (~2 GB image, ~1 GB RAM), so it needs a host
 with at least 2 GB of memory. Free tiers with 512 MB (Render free, Railway trial)
 are too small.
 
@@ -114,6 +130,7 @@ them at this repo's `Dockerfile`, give the instance **≥ 2 GB RAM**, and set
 | Variable | Default | Purpose |
 |---|---|---|
 | `OPENAI_API_KEY` | – | Use OpenAI for generation (otherwise GPT-2) |
+| `LOCAL_MODELS` | `true` | `false` = lite mode: no PyTorch, OpenAI does emotion detection too |
 | `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model name |
 | `USE_GPT4` | `true` | Set `false` to force GPT-2 even with a key |
 | `LOAD_GPT2` | `false` | Also load GPT-2 when using OpenAI (as a fallback) |
@@ -155,8 +172,11 @@ Other endpoints: `GET /personas`, `GET /metrics?session_id=`, `DELETE /memory?se
 
 ```
 PersonaGen/
-├── Dockerfile               # builds frontend + backend into one image
+├── Dockerfile               # full image: frontend + backend + local models
+├── Dockerfile.lite          # lite image for 512 MB hosts (OpenAI only)
+├── render.yaml              # Render Blueprint (uses Dockerfile.lite)
 ├── requirements.txt
+├── requirements-lite.txt
 ├── backend/
 │   ├── main.py              # FastAPI app, feedback loop, serves the built frontend
 │   ├── models.py            # emotion model, generators, retrieval, prompts

@@ -1,0 +1,28 @@
+# Lite image: no PyTorch or local models (~300 MB RAM). Requires OPENAI_API_KEY.
+# Used by render.yaml for Render's free tier. The full version is ./Dockerfile.
+
+# ---- 1. Build the React frontend ----
+FROM node:20-slim AS frontend
+WORKDIR /app/frontend
+COPY frontend/package.json ./
+RUN npm install --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+# ---- 2. Python backend that also serves the built frontend ----
+FROM python:3.11-slim
+ENV PYTHONUNBUFFERED=1 LOCAL_MODELS=false PORT=10000
+WORKDIR /app
+
+COPY requirements-lite.txt ./
+RUN pip install --no-cache-dir -r requirements-lite.txt
+
+COPY backend/ ./backend/
+RUN cd backend && python prepare_dataset.py && rm data/empatheticdialogues.tar.gz
+
+COPY --from=frontend /app/frontend/build ./frontend/build
+
+RUN useradd -m -u 1000 user && chown -R user /app
+USER user
+WORKDIR /app/backend
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]

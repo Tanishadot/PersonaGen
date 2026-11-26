@@ -1,0 +1,8 @@
+# Lite build (no PyTorch / local models) - fits a 512 MB instance.
+# Emotion detection and replies come from the OpenAI API.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+numpy>=1.26
+scikit-learn>=1.5
+python-dotenv>=1.0
+openai>=1.50

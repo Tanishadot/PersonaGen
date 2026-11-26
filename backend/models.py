@@ -15,13 +15,23 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-import torch
+import numpy as np
 from dotenv import load_dotenv
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
-from transformers import pipeline
 
 load_dotenv()
+
+# Local models (PyTorch + transformers) are optional. Without them ("lite" mode,
+# e.g. Render's free 512 MB tier) emotion detection and generation use OpenAI.
+LOCAL_MODELS = False
+if os.getenv("LOCAL_MODELS", "true").lower() == "true":
+    try:
+        import torch
+        from transformers import pipeline
+        LOCAL_MODELS = True
+    except ImportError:
+        pass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,7 +73,7 @@ class PersonaGenModels:
     """Loads and runs the emotion classifier, the generator and the retriever."""
 
     def __init__(self):
-        self.device = 0 if torch.cuda.is_available() else -1
+        self.device = (0 if torch.cuda.is_available() else -1) if LOCAL_MODELS else -1
         self.gpt_model = None
         self.emotion_classifier = None
 
@@ -93,13 +103,17 @@ class PersonaGenModels:
             self.models_loading = True
             start = time.time()
             try:
-                self._load_emotion_model()
-                # GPT-2 is only needed when we are not using the OpenAI API.
-                if not self.use_openai or os.getenv("LOAD_GPT2", "false").lower() == "true":
-                    self._load_gpt_model()
+                if LOCAL_MODELS:
+                    self._load_emotion_model()
+                    # GPT-2 is only needed when we are not using the OpenAI API.
+                    if not self.use_openai or os.getenv("LOAD_GPT2", "false").lower() == "true":
+                        self._load_gpt_model()
+                else:
+                    logger.info("Lite mode: no local models, using OpenAI for emotion + generation")
+                    if not self.use_openai:
+                        logger.warning("Lite mode without OPENAI_API_KEY: replies will be canned fallbacks")
                 self.load_empathy_dataset()
-                logger.info(f"Models ready in {time.time() - start:.1f}s "
-                            f"(generator: {'openai:' + self.openai_model if self.use_openai else 'gpt2'})")
+                logger.info(f"Models ready in {time.time() - start:.1f}s (generator: {self.generator_name()})")
             except Exception as e:  # keep serving with fallbacks
                 logger.exception("Model loading failed")
                 self.model_loading_error = str(e)
@@ -138,7 +152,9 @@ class PersonaGenModels:
             return self.empathy_dataset
 
         docs = [f"{s['prompt']} {s['situation']}" for s in self.empathy_dataset]
-        self._vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=2, sublinear_tf=True)
+        self._vectorizer = TfidfVectorizer(
+            stop_words="english", ngram_range=(1, 2), min_df=2, max_features=100_000,
+            sublinear_tf=True, dtype=np.float32)
         self._doc_matrix = self._vectorizer.fit_transform(docs)
         logger.info(f"Indexed {len(self.empathy_dataset)} dialogue pairs for retrieval")
         return self.empathy_dataset
@@ -159,6 +175,10 @@ class PersonaGenModels:
     def detect_emotion(self, text: str) -> Tuple[str, float]:
         processed = text.strip().lower()
         if self.emotion_classifier is None:
+            if self.use_openai:
+                detected = self._detect_emotion_openai(text)
+                if detected:
+                    return detected
             return self._rule_based_emotion_detection(processed)
         try:
             result = self.emotion_classifier(processed, truncation=True)[0]
@@ -171,6 +191,29 @@ class PersonaGenModels:
         except Exception as e:
             logger.error(f"Emotion detection failed: {e}")
             return self._rule_based_emotion_detection(processed)
+
+    def _detect_emotion_openai(self, text: str) -> Optional[Tuple[str, float]]:
+        """Classify into the same 7 labels as the local model, using the OpenAI API."""
+        try:
+            completion = self._get_openai_client().chat.completions.create(
+                model=self.openai_model,
+                messages=[
+                    {"role": "system", "content":
+                        "Classify the emotion of the user's message. Reply with JSON only: "
+                        '{"emotion": one of ' + json.dumps(list(EMOTION_GUIDELINES)) + ', "confidence": 0..1}'},
+                    {"role": "user", "content": text},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=30,
+                temperature=0,
+            )
+            data = json.loads(completion.choices[0].message.content)
+            emotion = str(data.get("emotion", "")).lower()
+            if emotion in EMOTION_GUIDELINES:
+                return emotion, float(data.get("confidence", 0.8))
+        except Exception as e:
+            logger.error(f"OpenAI emotion detection failed: {e}")
+        return None
 
     _KEYWORDS = {
         "sadness": ["failure", "useless", "sad", "tired", "depressed", "lonely", "hopeless", "cry", "crying"],
@@ -246,20 +289,24 @@ class PersonaGenModels:
             if response:
                 return response
             logger.warning("OpenAI generation failed, falling back to GPT-2")
-            self._load_gpt_model()
+            if LOCAL_MODELS:
+                self._load_gpt_model()
         return self._generate_with_gpt2(user_input, persona, emotion, history, example)
+
+    def _get_openai_client(self):
+        if self._openai_client is None:
+            import openai
+            self._openai_client = openai.OpenAI(api_key=self.openai_api_key, timeout=30)
+        return self._openai_client
 
     def _generate_with_openai(self, system_prompt: str, user_input: str, history: List[Dict]) -> Optional[str]:
         try:
-            if self._openai_client is None:
-                import openai
-                self._openai_client = openai.OpenAI(api_key=self.openai_api_key, timeout=30)
             messages = [{"role": "system", "content": system_prompt}]
             for turn in history:
                 messages.append({"role": "user", "content": turn["user"]})
                 messages.append({"role": "assistant", "content": turn["assistant"]})
             messages.append({"role": "user", "content": user_input})
-            completion = self._openai_client.chat.completions.create(
+            completion = self._get_openai_client().chat.completions.create(
                 model=self.openai_model, messages=messages, max_tokens=250, temperature=0.7,
             )
             return (completion.choices[0].message.content or "").strip()
