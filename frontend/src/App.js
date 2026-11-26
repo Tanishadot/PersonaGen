@@ -28,6 +28,9 @@ function App() {
   useEffect(() => {
     checkBackendHealth();
     loadPersonas();
+    // Run once on mount only; these functions are recreated every render,
+    // so listing them would re-trigger the health check loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkBackendHealth = async () => {
