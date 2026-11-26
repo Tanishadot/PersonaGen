@@ -2,6 +2,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 
+// Empty in production (frontend is served by the backend); set REACT_APP_API_URL
+// if the API lives on a different domain. In development the CRA proxy forwards to :8000.
+const API_BASE = process.env.REACT_APP_API_URL || '';
+
+// One conversation memory per browser tab.
+const getSessionId = () => {
+  try {
+    let id = sessionStorage.getItem('personagen_session');
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sessionStorage.setItem('personagen_session', id);
+    }
+    return id;
+  } catch (e) {
+    return 'default';
+  }
+};
+const SESSION_ID = getSessionId();
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -32,7 +51,7 @@ function App() {
 
   const checkBackendHealth = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/health');
+      const response = await axios.get(`${API_BASE}/health`);
       const status = response.data.status;
       const modelsLoaded = response.data.models_loaded;
       
@@ -60,7 +79,7 @@ function App() {
 
   const loadPersonas = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/personas');
+      const response = await axios.get(`${API_BASE}/personas`);
       setPersonas(response.data.personas);
     } catch (error) {
       console.error('Error loading personas:', error);
@@ -69,7 +88,7 @@ function App() {
 
   const loadMetrics = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/metrics');
+      const response = await axios.get(`${API_BASE}/metrics`, { params: { session_id: SESSION_ID } });
       setMetrics(response.data);
     } catch (error) {
       console.error('Error loading metrics:', error);
@@ -90,7 +109,8 @@ function App() {
     setIsLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:8000/chat', {
+      const response = await axios.post(`${API_BASE}/chat`, {
+        session_id: SESSION_ID,
         message: inputMessage,
         persona: persona,
         empathy_threshold: empathyThreshold,
@@ -174,7 +194,7 @@ function App() {
 
   const clearMemory = async () => {
     try {
-      await axios.delete('http://localhost:8000/memory');
+      await axios.delete(`${API_BASE}/memory`, { params: { session_id: SESSION_ID } });
       loadMetrics();
       console.log('Memory cleared successfully');
     } catch (error) {

@@ -1,299 +1,180 @@
+---
+title: PersonaGen
+emoji: 💬
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # PersonaGen: Emotionally Intelligent Chatbot with Feedback Loop
 
-An advanced AI chatbot system that combines emotion detection, empathy scoring, and adaptive response generation to create emotionally intelligent conversations.
+A chatbot that detects how you feel, finds how real people responded to similar
+situations, and generates a reply in that tone — regenerating it if it isn't
+empathetic enough.
 
-## 🌟 Features
+## Features
 
-- **Emotion Detection**: Uses RoBERTa-based emotion classification to detect user emotions
-- **Empathy Scoring**: Multi-factor empathy scoring system with configurable thresholds
-- **Feedback Loop**: Automatic response regeneration when empathy scores are below threshold
-- **Multiple Personas**: Choose between Therapist, Friendly, or Professional communication styles
-- **Memory System**: Maintains conversation context for more personalized responses
-- **Real-time Metrics**: Track empathy scores, emotion patterns, and response diversity
-- **Modern UI**: Clean, responsive React interface with real-time updates
+- **Emotion detection** with a DistilRoBERTa classifier (anger, disgust, fear, joy, neutral, sadness, surprise)
+- **Retrieval** over ~47k listener replies from the EmpatheticDialogues dataset (TF-IDF, filtered by detected emotion)
+- **Emotion-aware prompting**: persona + tone guideline for the detected emotion + the retrieved reply as a tone example
+- **Conversation memory** per browser session (last 5 turns are sent to the generator)
+- **Empathy feedback loop**: score the reply and regenerate with a refined prompt if below threshold
+- **Generators**: OpenAI chat model (`gpt-4o-mini` by default) when an API key is set, local GPT-2 otherwise
+- **React UI** showing emotion, empathy score, retries, and whether memory/retrieval were used
 
-## 🏗️ System Architecture
+## How it works
 
 ```
-User Input → GPT-2 Generator → RoBERTa Emotion Classifier → Empathy Score Calculation
-      ↓
-If score < threshold → Refine Prompt → Regenerate Response (max 3 retries)
-      ↓
-Final Output with emotion detection and empathy metrics
+User message
+   │
+   ├─► Emotion classifier ──────────────► "sadness" (0.99)
+   ├─► Retrieve similar EmpatheticDialogues pair (same emotion preferred)
+   ├─► Session memory ──────────────────► previous turns
+   ▼
+Emotion-aware prompt (persona + tone guideline + retrieved example + history)
+   ▼
+Generate ─► empathy score ─► below threshold? refine prompt and retry (max 3)
+   ▼
+Best reply + metrics  ─►  saved to session memory
 ```
 
-## 📋 Requirements
+## Run locally
 
-- Python 3.8+
-- Node.js 14+
-- 8GB+ RAM (for model loading)
-- Internet connection (for initial model download)
-
-## 🚀 Quick Start
-
-### 1. Clone and Setup
+Requires Python 3.10+ and Node 18+.
 
 ```bash
-cd C:\Users\User\CascadeProjects\PersonaGen
-```
-
-### 2. Backend Setup
-
-```bash
-# Navigate to backend directory
-cd backend
-
-# Create virtual environment
+# 1. Backend
 python -m venv venv
-
-# Activate virtual environment
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-# source venv/bin/activate
-
-# Install dependencies
+source venv/bin/activate            # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cd backend
+python prepare_dataset.py           # downloads EmpatheticDialogues and builds data/empathetic_dialogues.json
+                                    # (or: python prepare_dataset.py ../empatheticdialogues.tar.gz)
+uvicorn main:app --reload --port 8000
 
-# Start the backend server
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 3. Frontend Setup
-
-Open a new terminal:
-
-```bash
-# Navigate to frontend directory
+# 2. Frontend (new terminal)
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start the frontend development server
-npm start
+npm start                           # http://localhost:3000 (API calls are proxied to :8000)
 ```
 
-### 4. Access the Application
+API docs: http://localhost:8000/docs
 
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-
-## 📁 Project Structure
-
-```
-PersonaGen/
-├── backend/
-│   ├── main.py              # FastAPI application and endpoints
-│   ├── models.py            # AI models (GPT-2, RoBERTa) and dataset loading
-│   ├── utils.py             # Empathy scoring, evaluation metrics, memory management
-│   └── requirements.txt     # Python dependencies
-├── frontend/
-│   ├── public/
-│   │   └── index.html       # HTML template
-│   ├── src/
-│   │   ├── App.js           # Main React component
-│   │   ├── App.css          # Styling
-│   │   ├── index.js         # React entry point
-│   │   └── index.css        # Global styles
-│   └── package.json         # Node.js dependencies
-├── requirements.txt         # Project dependencies
-└── README.md               # This file
-```
-
-## 🔧 Configuration
-
-### Environment Variables (Required for GPT-4)
-
-Create a `.env` file in the project root:
+To use OpenAI instead of GPT-2, create `backend/.env`:
 
 ```env
-# OpenAI API Configuration (Required for GPT-4)
-OPENAI_API_KEY=your_openai_api_key_here
-
-# Generation Configuration
-USE_GPT4=true
-GPT4_MODEL=gpt-4o-mini
-
-# API Configuration
-API_HOST=0.0.0.0
-API_PORT=8000
-API_DEBUG=false
-
-# Performance Configuration
-MAX_RETRIES=3
-EMPATHY_THRESHOLD=0.7
-MAX_RESPONSE_LENGTH=150
-
-# Model cache directory (optional)
-HF_HOME=./cache
-
-# Log level (optional)
-LOG_LEVEL=INFO
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini   # optional
 ```
 
-### Getting OpenAI API Key
+### Run with Docker (same as production)
 
-1. Go to [OpenAI Platform](https://platform.openai.com/)
-2. Sign up or log in
-3. Navigate to API Keys
-4. Create a new API key
-5. Copy the key and add it to your `.env` file
-
-### Model Selection
-
-- **GPT-4** (Default): Higher quality responses, requires API key
-- **GPT-2**: Local model, no API key required but lower quality
-
-To use GPT-2 instead, set `USE_GPT4=false` in your `.env` file.
-
-### Empathy Threshold Adjustment
-
-The empathy threshold can be adjusted in the frontend using the slider (0.1 - 1.0):
-
-- **0.8-1.0**: Very strict empathy requirements
-- **0.6-0.8**: Balanced empathy and response quality
-- **0.4-0.6**: More lenient empathy requirements
-- **0.1-0.4**: Minimal empathy filtering
-
-## 🎯 Available Personas
-
-1. **Therapist**: Compassionate and empathetic, focused on emotional support
-2. **Friendly**: Warm and cheerful, positive and encouraging
-3. **Professional**: Clear, concise, and informative
-
-## 📊 API Endpoints
-
-### Chat Endpoint
-```http
-POST /chat
-Content-Type: application/json
-
-{
-  "message": "I'm feeling really stressed about work",
-  "persona": "therapist",
-  "empathy_threshold": 0.6,
-  "max_retries": 3
-}
+```bash
+docker build -t personagen .
+docker run -p 7860:7860 personagen                          # GPT-2
+docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... personagen # OpenAI
 ```
 
-### Response Format
+Open http://localhost:7860. The image bundles the frontend, dataset and both
+models, so it starts in a few seconds and needs no downloads at runtime.
+
+## Deploy
+
+The app is one Docker container (~2 GB image, ~1 GB RAM), so it needs a host
+with at least 2 GB of memory. Free tiers with 512 MB (Render free, Railway trial)
+are too small.
+
+### Hugging Face Spaces (free, recommended)
+
+1. Create a Space at https://huggingface.co/new-space — SDK: **Docker**, template: **Blank**, hardware: **CPU basic (free)**.
+2. Upload the code (from the repo root):
+   ```bash
+   pip install -U huggingface_hub
+   huggingface-cli login
+   huggingface-cli upload <your-username>/<space-name> . . --repo-type=space \
+     --exclude "*.tar.gz" "*node_modules*" "frontend/build/*" "backend/data/*" ".git/*" "*.env" "*__pycache__*"
+   ```
+   The excludes keep out your `.env` (API key), `node_modules` and the dataset archive.
+3. Optional: in the Space's **Settings → Variables and secrets**, add a secret `OPENAI_API_KEY` for much better replies.
+
+The Space builds the Dockerfile (~5–10 min) and is then live at
+`https://<your-username>-<space-name>.hf.space`. The YAML block at the top of
+this README is the Space configuration.
+
+### Any other Docker host
+
+Render (Starter plan+), Railway, Fly.io, Google Cloud Run, etc. all work: point
+them at this repo's `Dockerfile`, give the instance **≥ 2 GB RAM**, and set
+`OPENAI_API_KEY` if you want it. The container listens on `$PORT` (default 7860).
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | – | Use OpenAI for generation (otherwise GPT-2) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model name |
+| `USE_GPT4` | `true` | Set `false` to force GPT-2 even with a key |
+| `LOAD_GPT2` | `false` | Also load GPT-2 when using OpenAI (as a fallback) |
+| `PRELOAD_MODELS` | `true` | Load models at startup instead of on first request |
+| `CORS_ORIGINS` | `http://localhost:3000,...` | Only needed if the UI is hosted on a different domain |
+| `REACT_APP_API_URL` | – | Build-time: API URL if the UI is hosted separately |
+| `PORT` | `7860` (Docker) | Port to listen on |
+
+## API
+
+`POST /chat`
+
+```json
+{ "message": "I'm stressed about work", "persona": "therapist",
+  "empathy_threshold": 0.6, "max_retries": 3, "session_id": "abc123" }
+```
+
+Response:
+
 ```json
 {
-  "response": "I understand that work stress can be overwhelming...",
-  "detected_emotion": "sadness",
-  "emotion_confidence": 0.85,
-  "empathy_score": 0.78,
+  "response": "That sounds really overwhelming...",
+  "detected_emotion": "fear",
+  "emotion_confidence": 0.93,
+  "empathy_score": 0.71,
   "retry_count": 1,
   "persona": "therapist",
   "context_used": true,
-  "bleu_score": 0.65
+  "retrieval_used": true,
+  "retrieved_context": "What about it made you feel nervous?",
+  "bleu_score": 0.04,
+  "generator": "openai:gpt-4o-mini"
 }
 ```
 
-### Other Endpoints
+Other endpoints: `GET /personas`, `GET /metrics?session_id=`, `DELETE /memory?session_id=`, `GET /health`.
 
-- `GET /personas` - List available personas
-- `GET /metrics` - Conversation metrics and statistics
-- `GET /health` - System health check
-- `DELETE /memory` - Clear conversation memory
+## Project structure
 
-## 🧠 Models and Datasets
+```
+PersonaGen/
+├── Dockerfile               # builds frontend + backend into one image
+├── requirements.txt
+├── backend/
+│   ├── main.py              # FastAPI app, feedback loop, serves the built frontend
+│   ├── models.py            # emotion model, generators, retrieval, prompts
+│   ├── utils.py             # empathy scoring, BLEU/diversity, session memory
+│   └── prepare_dataset.py   # builds data/empathetic_dialogues.json
+└── frontend/                # React app (Create React App)
+```
 
-### Pre-trained Models Used
+## Limitations
 
-1. **GPT-2**: `gpt2` - Response generation
-2. **RoBERTa Emotion**: `j-hartmann/emotion-english-distilroberta-base` - Emotion classification
+- The empathy score is keyword-based, so it rewards phrases like "I understand"
+  and can score genuinely warm replies low (e.g. replies to good news).
+- GPT-2 is a small base model; its replies are often off-topic. Use an OpenAI key for a real demo.
+- This is a research/portfolio project, **not** a mental-health service. It has no
+  crisis detection — don't present it as a substitute for professional help.
 
-### Dataset
+## Acknowledgments
 
-- **EmpatheticDialogues**: Automatically downloaded from HuggingFace on first run
-- Used for training context and empathy pattern understanding
-
-## 📈 Evaluation Metrics
-
-The system implements multiple evaluation metrics:
-
-- **Empathy Score**: Multi-factor scoring (0.0 - 1.0)
-  - Empathy language usage (30%)
-  - Emotional acknowledgment (25%)
-  - Response length/completeness (20%)
-  - Supportive language (15%)
-  - Personalization (10%)
-
-- **BLEU Score**: Response quality assessment
-- **Response Diversity**: Avoids repetitive responses
-- **Emotion Detection Confidence**: Model confidence in emotion classification
-
-## 🔄 Feedback Loop Mechanism
-
-1. Generate initial response
-2. Detect emotion in user input
-3. Calculate empathy score
-4. If score < threshold:
-   - Refine prompt with empathy instructions
-   - Regenerate response
-   - Repeat (max 3 retries)
-5. Return best response with metrics
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-1. **Models not loading**:
-   - Check internet connection for initial download
-   - Ensure sufficient RAM (8GB+ recommended)
-   - Check virtual environment activation
-
-2. **Frontend not connecting**:
-   - Ensure backend is running on port 8000
-   - Check for CORS issues
-   - Verify proxy configuration in package.json
-
-3. **Low empathy scores**:
-   - Adjust empathy threshold downward
-   - Try different persona
-   - Check if context is being used
-
-4. **Memory issues**:
-   - Clear conversation memory using the button
-   - Restart backend server
-   - Check system resources
-
-### Performance Optimization
-
-- Use GPU acceleration if available (CUDA)
-- Limit conversation history in memory
-- Adjust model parameters for faster inference
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📝 License
-
-This project is for educational and research purposes. Please ensure compliance with the licenses of the pre-trained models used.
-
-## 🙏 Acknowledgments
-
-- Hugging Face for the transformers library and datasets
-- OpenAI for GPT-2
-- RoBERTa emotion classification model authors
-- EmpatheticDialogues dataset creators
-
-## 📞 Support
-
-For issues and questions:
-1. Check the troubleshooting section
-2. Review API documentation at `/docs`
-3. Check console logs for error messages
-4. Verify all dependencies are correctly installed
-
----
-
-**Note**: The first run may take several minutes as models are downloaded and cached. Subsequent runs will be much faster.
+- [EmpatheticDialogues](https://github.com/facebookresearch/EmpatheticDialogues) (Rashkin et al., 2019)
+- [j-hartmann/emotion-english-distilroberta-base](https://huggingface.co/j-hartmann/emotion-english-distilroberta-base)
+- Hugging Face Transformers, FastAPI, React

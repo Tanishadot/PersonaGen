@@ -294,7 +294,8 @@ class PersonaGenModels:
             )
             text = out[0]["generated_text"]
             # Stop at the next turn GPT-2 invents for the user.
-            for stop in ("\nUser:", "User:", "\n\n"):
+            text = text.strip().split("\n")[0]
+            for stop in ("User:", "Assistant:", "User and"):
                 text = text.split(stop)[0]
             response = text.strip()
             if emotion in ("sadness", "anger", "fear") and not any(
