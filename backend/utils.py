@@ -8,17 +8,37 @@ import numpy as np
 from typing import List, Dict, Tuple
 from collections import deque
 import logging
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-from nltk.tokenize import word_tokenize
-import nltk
-
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+import math
+import threading
+from collections import Counter, OrderedDict
 
 logger = logging.getLogger(__name__)
+
+def word_tokenize(text: str) -> List[str]:
+    """Lightweight tokenizer (words and punctuation)."""
+    return re.findall(r"\w+|[^\w\s]", text)
+
+
+def sentence_bleu(reference: List[str], hypothesis: List[str], max_n: int = 4) -> float:
+    """Sentence BLEU with add-one smoothing (equivalent in spirit to NLTK's method1)."""
+    if not hypothesis or not reference:
+        return 0.0
+    log_precision = 0.0
+    for n in range(1, max_n + 1):
+        hyp = Counter(tuple(hypothesis[i:i + n]) for i in range(len(hypothesis) - n + 1))
+        ref = Counter(tuple(reference[i:i + n]) for i in range(len(reference) - n + 1))
+        total = sum(hyp.values())
+        overlap = sum(min(c, ref[g]) for g, c in hyp.items())
+        if total == 0:
+            precision = 1.0 / (len(hypothesis) + 1)
+        elif overlap == 0:
+            precision = 0.1 / total
+        else:
+            precision = overlap / total
+        log_precision += math.log(precision) / max_n
+    bp = 1.0 if len(hypothesis) > len(reference) else math.exp(1 - len(reference) / len(hypothesis))
+    return bp * math.exp(log_precision)
+
 
 class EmpathyScorer:
     """Class for computing empathy scores"""
@@ -173,24 +193,10 @@ class EmpathyScorer:
 class EvaluationMetrics:
     """Class for computing evaluation metrics"""
     
-    def __init__(self):
-        self.smoothing_function = SmoothingFunction().method1
-    
     def calculate_bleu_score(self, reference: str, hypothesis: str) -> float:
         """Calculate BLEU score for response quality"""
         try:
-            reference_tokens = [word_tokenize(reference.lower())]
-            hypothesis_tokens = word_tokenize(hypothesis.lower())
-            
-            if len(hypothesis_tokens) == 0:
-                return 0.0
-            
-            score = sentence_bleu(
-                reference_tokens,
-                hypothesis_tokens,
-                smoothing_function=self.smoothing_function
-            )
-            return score
+            return sentence_bleu(word_tokenize(reference.lower()), word_tokenize(hypothesis.lower()))
         except Exception as e:
             logger.error(f"Error calculating BLEU score: {e}")
             return 0.0
@@ -263,6 +269,10 @@ class MemoryManager:
         
         return "\n".join(context_parts)
     
+    def get_history(self) -> List[Dict]:
+        """Previous turns, oldest first, as [{"user": ..., "assistant": ...}]"""
+        return [{"user": m['user_input'], "assistant": m['bot_response']} for m in self.memory]
+
     def get_recent_emotions(self, count: int = 3) -> List[str]:
         """Get recent emotions from memory"""
         recent_messages = list(self.memory)[-count:]
@@ -285,10 +295,30 @@ class MemoryManager:
         from datetime import datetime
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+class SessionStore:
+    """One MemoryManager per browser session, so visitors don't share a conversation."""
+
+    def __init__(self, max_sessions: int = 1000, max_memory_size: int = 5):
+        self._sessions: "OrderedDict[str, MemoryManager]" = OrderedDict()
+        self._lock = threading.Lock()
+        self.max_sessions = max_sessions
+        self.max_memory_size = max_memory_size
+
+    def get(self, session_id: str) -> MemoryManager:
+        session_id = (session_id or "default")[:64]
+        with self._lock:
+            memory = self._sessions.pop(session_id, None) or MemoryManager(self.max_memory_size)
+            self._sessions[session_id] = memory  # most recently used last
+            while len(self._sessions) > self.max_sessions:
+                self._sessions.popitem(last=False)
+            return memory
+
+
 # Global instances
 empathy_scorer = EmpathyScorer()
 evaluator = EvaluationMetrics()
-memory_manager = MemoryManager()
+session_store = SessionStore()
+memory_manager = session_store.get("default")
 
 def get_empathy_scorer():
     """Get global empathy scorer instance"""
@@ -298,6 +328,6 @@ def get_evaluator():
     """Get global evaluator instance"""
     return evaluator
 
-def get_memory_manager():
-    """Get global memory manager instance"""
-    return memory_manager
+def get_memory_manager(session_id: str = "default"):
+    """Get the memory manager for a session"""
+    return session_store.get(session_id)
